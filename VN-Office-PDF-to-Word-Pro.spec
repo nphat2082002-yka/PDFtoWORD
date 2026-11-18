@@ -86,6 +86,27 @@ tv_dir = Path(torchvision.__file__).resolve().parent
 for pyd_file in tv_dir.glob("*.pyd"):
     binaries.append((str(pyd_file), "torchvision"))
 
+# Bundle Microsoft VC++ 2015-2022/2026 x64 runtime DLLs (notably `vcruntime140_threads.dll`
+# required by `torch_cpu.dll` on target PCs without the latest VC++ Redistributable installed).
+existing_bin_names = {Path(item[0]).name.lower() for item in binaries}
+sys32_dir = Path(r"C:\Windows\System32")
+for vc_dll in (
+    "vcruntime140.dll",
+    "vcruntime140_1.dll",
+    "vcruntime140_threads.dll",
+    "msvcp140.dll",
+    "msvcp140_1.dll",
+    "msvcp140_2.dll",
+    "msvcp140_atomic_wait.dll",
+    "msvcp140_codecvt_ids.dll",
+    "concrt140.dll",
+    "vcomp140.dll",
+):
+    candidate = sys32_dir / vc_dll
+    if candidate.is_file() and vc_dll.lower() not in existing_bin_names:
+        binaries.append((str(candidate), "."))
+        existing_bin_names.add(vc_dll.lower())
+
 # Include vietocr YAML configs if any exist under site-packages
 datas += collect_data_files("vietocr", include_py_files=False)
 

@@ -8,10 +8,7 @@ import sys
 from pathlib import Path
 
 # Import PyTorch before PaddlePaddle/Qt on Windows to prevent OpenMP/MKL DLL conflicts.
-try:
-    import torch  # noqa: F401
-except Exception:
-    pass
+import torch  # noqa: F401
 
 
 def _enable_windows_dpi_awareness() -> None:

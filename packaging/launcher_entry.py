@@ -9,6 +9,8 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
+import traceback
 from pathlib import Path
 
 
@@ -26,6 +28,37 @@ def _bootstrap_paths() -> Path:
         if (src_candidate / "app.py").is_file() and str(src_candidate) not in sys.path:
             sys.path.insert(0, str(src_candidate))
     return exe_dir
+
+
+def _has_external_app_script(exe_dir: Path) -> bool:
+    return (exe_dir / "app_src" / "app.py").is_file() or (exe_dir / "app.py").is_file()
+
+
+def _is_standalone_bundle(exe_dir: Path) -> bool:
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass and (Path(meipass) / "app.py").is_file():
+        return True
+    return (exe_dir / "_internal").is_dir()
+
+
+def _write_startup_error_log(exc: BaseException, exe_dir: Path) -> Path | None:
+    content = (
+        "VN-Office PDF to Word Pro startup failure\n"
+        f"Executable dir: {exe_dir}\n"
+        f"Python: {sys.version}\n"
+        f"Exception: {type(exc).__name__}: {exc}\n\n"
+        f"{traceback.format_exc()}"
+    )
+    for candidate in (
+        exe_dir / "startup_error.log",
+        Path(tempfile.gettempdir()) / "vn_office_pdf2word_startup_error.log",
+    ):
+        try:
+            candidate.write_text(content, encoding="utf-8")
+            return candidate
+        except OSError:
+            continue
+    return None
 
 
 def _run_in_process() -> int:
@@ -53,7 +86,7 @@ def _run_via_python_runtime(exe_dir: Path) -> int:
     existing_pp = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = app_parent if not existing_pp else f"{app_parent}{os.pathsep}{existing_pp}"
 
-    smoke = "--smoke-test" in sys.argv[1:]
+    smoke = "--smoke-test" in sys.argv[1:] or "--smoke-ocr" in sys.argv[1:]
     py_exe = shutil.which("python" if smoke else "pythonw") or shutil.which("python") or sys.executable
     cmd = [py_exe, str(app_script), *sys.argv[1:]]
     proc = subprocess.run(cmd, env=env, check=False)
@@ -64,10 +97,19 @@ def main() -> int:
     exe_dir = _bootstrap_paths()
     try:
         return _run_in_process()
-    except ImportError:
-        if not getattr(sys, "frozen", False):
-            raise
-        return _run_via_python_runtime(exe_dir)
+    except (ImportError, OSError) as exc:
+        if getattr(sys, "frozen", False) and _has_external_app_script(exe_dir) and not _is_standalone_bundle(exe_dir):
+            return _run_via_python_runtime(exe_dir)
+
+        log_path = _write_startup_error_log(exc, exe_dir)
+        log_hint = f"\nLog: {log_path}" if log_path else ""
+        msg = (
+            "Không thể khởi tạo thư viện AI / Runtime của ứng dụng.\n"
+            "Nếu chạy trên máy mới, vui lòng cài đặt Microsoft Visual C++ Redistributable "
+            "(2015–2022 x64): https://aka.ms/vs/17/release/vc_redist.x64.exe\n"
+            f"Chi tiết lỗi gốc: {type(exc).__name__}: {exc}{log_hint}"
+        )
+        raise RuntimeError(msg) from exc
 
 
 if __name__ == "__main__":
